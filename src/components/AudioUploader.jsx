@@ -111,7 +111,7 @@ const AudioUploader = () => {
       </button>
 
       {showHistory && (
-        <div className="mt-6 bg-white p-4 rounded-lg shadow-lg overflow-auto">
+        <div className="mt-6 bg-white p-4 rounded-lg shadow-lg overflow-auto max-h-80">
           <h3 className="text-lg font-semibold mb-3 border-b pb-2">
             📜 Transcription History
           </h3>
