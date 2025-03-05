@@ -9,50 +9,58 @@ const AudioRecorder = ({ onRecordingComplete }) => {
   const [transcription, setTranscription] = useState("");
 
   const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
-    let chunks = [];
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      let chunks = [];
 
-    recorder.ondataavailable = (e) => chunks.push(e.data);
-    recorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: "audio/wav" });
-      setAudioBlob(blob);
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: "audio/wav" });
+        const file = new File([blob], `recording-${Date.now()}.wav`, {
+          type: "audio/wav",
+        });
+        setAudioBlob(blob);
 
-      const formData = new FormData();
-      formData.append("audio", blob, "recording.wav");
+        const formData = new FormData();
+        formData.append("audio", file);
+        formData.append("filename", file.name);
 
-      try {
-        const uploadResponse = await axios.post(
-          "http://localhost:5000/upload/upload",
-          formData,
-          {
-            headers: { "Content-Type": "multipart/form-data" },
-          }
-        );
+        try {
+          const uploadResponse = await axios.post(
+            "http://localhost:5000/upload/upload",
+            formData,
+            { headers: { "Content-Type": "multipart/form-data" } }
+          );
 
-        const fileUrl = uploadResponse.data.file_url;
+          const fileUrl = uploadResponse.data.file_url;
 
-        const transcribeResponse = await axios.post(
-          "http://localhost:5000/transcription/transcribe",
-          {
-            audio_url: fileUrl,
-          }
-        );
+          const transcribeResponse = await axios.post(
+            "http://localhost:5000/transcription/transcribe",
+            { audio_url: fileUrl, filename: file.name }
+          );
 
-        setTranscription(transcribeResponse.data.transcription);
-      } catch (error) {
-        console.error("Error uploading/transcribing:", error);
-      }
-    };
+          setTranscription(transcribeResponse.data.transcription);
+        } catch (error) {
+          console.error("Error uploading/transcribing:", error);
+        }
+      };
 
-    setMediaRecorder(recorder);
-    recorder.start();
-    setRecording(true);
+      recorder.start();
+      setMediaRecorder(recorder);
+      setRecording(true);
+    } catch (error) {
+      console.error("Error accessing microphone:", error);
+    }
   };
 
   const stopRecording = () => {
-    mediaRecorder.stop();
-    setRecording(false);
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      setRecording(false);
+    } else {
+      console.error("No active media recorder found");
+    }
   };
 
   return (
@@ -61,7 +69,7 @@ const AudioRecorder = ({ onRecordingComplete }) => {
 
       <button
         onClick={recording ? stopRecording : startRecording}
-        className={`flex items-center justify-center align-self: center; px-6 py-3 rounded-lg text-white font-semibold transition duration-300 ${
+        className={`flex items-center justify-center px-6 py-3 rounded-lg text-white font-semibold transition duration-300 ${
           recording
             ? "bg-red-500 hover:bg-red-600"
             : "bg-green-500 hover:bg-green-600"
@@ -84,7 +92,7 @@ const AudioRecorder = ({ onRecordingComplete }) => {
       )}
 
       {transcription && (
-        <div className="mt-4 p-4 bg-gray-100 rounded-lg shadow text-left">
+        <div className="mt-4 p-4 bg-gray-100 rounded-lg shadow text-left break-words whitespace-pre-wrap">
           <h3 className="text-lg font-semibold">📝 Transcription:</h3>
           <p className="text-gray-700">{transcription}</p>
         </div>

@@ -1,37 +1,63 @@
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const fetch = require("node-fetch");
+const { createClient } = require("@supabase/supabase-js");
 const axios = require("axios");
 require("dotenv").config();
 
 const router = express.Router();
 
-// ✅ Upload audio to AssemblyAI & request transcription
-async function transcribeAudio(audioUrl) {
+// ✅ Initialize Supabase Client
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+// ✅ Save transcription to Supabase
+async function saveTranscription(audioUrl, filename, transcription) {
+  console.log("📥 Saving transcription to Supabase...");
+
+  const { data, error } = await supabase.from("transcriptions").insert([
+    {
+      audio_url: audioUrl || "No URL Provided",
+      filename: filename || "Unknown",
+      transcription: transcription || "No transcription available",
+      created_at: new Date().toISOString(),
+    },
+  ]);
+
+  if (error) {
+    console.error(
+      "❌ Error saving transcription:",
+      error.message,
+      error.details
+    );
+    throw new Error("Failed to save transcription");
+  }
+
+  console.log("✅ Transcription saved to Supabase:", data);
+}
+
+// ✅ Transcribe & Save API
+router.post("/transcribe", async (req, res) => {
+  const { audio_url, filename } = req.body;
+  if (!audio_url || !filename) {
+    return res
+      .status(400)
+      .json({ error: "Audio URL and filename are required" });
+  }
+
   try {
     console.log("📤 Sending audio to AssemblyAI...");
 
     const response = await axios.post(
       "https://api.assemblyai.com/v2/transcript",
-      { audio_url: audioUrl },
+      { audio_url },
       { headers: { Authorization: process.env.ASSEMBLYAI_API_KEY } }
     );
 
-    return response.data.id; // Transcript ID
-  } catch (error) {
-    console.error(
-      "❌ AssemblyAI Upload Error:",
-      error.response?.data || error.message
-    );
-    throw new Error("Failed to upload audio to AssemblyAI");
-  }
-}
+    const transcriptId = response.data.id;
+    let transcription = "";
 
-// ✅ Check transcription status
-async function getTranscription(transcriptId) {
-  try {
-    while (true) {
+    while (!transcription) {
       const result = await axios.get(
         `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
         {
@@ -40,46 +66,55 @@ async function getTranscription(transcriptId) {
       );
 
       if (result.data.status === "completed") {
-        return result.data.text; // ✅ Return final transcription
+        transcription = result.data.text;
       } else if (result.data.status === "failed") {
-        throw new Error("Transcription failed.");
+        throw new Error("❌ AssemblyAI transcription failed.");
       }
 
       console.log("⏳ Waiting for transcription...");
-      await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait 5 seconds
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
-  } catch (error) {
-    console.error(
-      "❌ AssemblyAI Transcription Error:",
-      error.response?.data || error.message
-    );
-    throw new Error("Failed to get transcription from AssemblyAI");
-  }
-}
-
-// ✅ API Route to Transcribe Audio
-router.post("/transcribe", async (req, res) => {
-  const { audio_url } = req.body;
-  if (!audio_url) {
-    return res.status(400).json({ error: "No audio URL provided" });
-  }
-
-  try {
-    console.log("📥 Downloading audio from:", audio_url);
-
-    // ✅ Step 1: Upload to AssemblyAI
-    const transcriptId = await transcribeAudio(audio_url);
-
-    // ✅ Step 2: Get the transcription result
-    const transcription = await getTranscription(transcriptId);
 
     console.log("✅ Transcription received:", transcription);
+
+    await saveTranscription(audio_url, filename, transcription);
+
     res.json({ transcription });
   } catch (error) {
     console.error("❌ Error processing transcription:", error.message);
     res
       .status(500)
       .json({ error: "Transcription failed", details: error.message });
+  }
+});
+
+// ✅ Get Transcription History
+router.get("/history", async (req, res) => {
+  try {
+    console.log("📜 Fetching transcription history...");
+
+    const { data, error } = await supabase
+      .from("transcriptions")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("❌ Error fetching history:", error);
+      return res
+        .status(500)
+        .json({ error: "Failed to fetch history", details: error.message });
+    }
+
+    console.log("✅ Supabase History Response:", data); // Debugging line
+    console.log("✅ Supabase History Response length:", data.length); //added debug line
+    if (data.length > 0) {
+      console.log("First history item:", data[0]); //added debug line
+    }
+
+    res.json(data);
+  } catch (error) {
+    console.error("❌ Error:", error.message);
+    res.status(500).json({ error: "Server error" });
   }
 });
 
